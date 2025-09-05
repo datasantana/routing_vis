@@ -5,6 +5,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import mapboxgl from 'mapbox-gl'
+// Import Mapbox CSS with higher specificity to avoid conflicts
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { kml } from '@mapbox/togeojson'
 
@@ -34,7 +35,13 @@ const initializeMap = () => {
     style: mapboxBasemap, // style URL
     center: [-101.5731833069, 26.5346045702], // starting position [lng, lat]
     zoom: 7.5, // starting zoom
-    projection: 'mercator' // map projection
+    projection: 'mercator', // map projection
+    // Performance optimizations
+    antialias: true, // Enable antialiasing for smoother rendering
+    optimizeForTerrain: false, // Disable terrain optimization if not needed
+    renderWorldCopies: false, // Disable rendering multiple world copies for better performance
+    maxZoom: 18, // Set reasonable max zoom to prevent over-detailed rendering
+    minZoom: 2 // Set minimum zoom
   })
 
   // Add navigation controls
