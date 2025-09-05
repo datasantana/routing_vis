@@ -12,6 +12,7 @@ import { kml } from '@mapbox/togeojson'
 const mapboxAccessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
 const mapboxBasemap = import.meta.env.VITE_MAPBOX_STANDARD_BASEMAP || 'mapbox://styles/mapbox/streets-v12'
 const poisAssetsPath = import.meta.env.VITE_POIS_ASSETS_PATH
+const routesAssetsPath = import.meta.env.VITE_ROUTES_ASSETS_PATH
 
 // Reactive references
 const map = ref(null)
@@ -47,6 +48,8 @@ const initializeMap = () => {
     console.log('Map loaded successfully')
     // Load POIs after map is initialized
     loadPoisLayer()
+    // Load routes after map is initialized
+    loadRoutesLayer()
   })
 
   // Error handling
@@ -218,6 +221,163 @@ const loadPoisLayer = async () => {
     
   } catch (error) {
     console.error('Error loading POIs layer:', error)
+  }
+}
+
+// Load Routes layer from KML
+const loadRoutesLayer = async () => {
+  if (!map.value || !routesAssetsPath) {
+    console.error('Map not initialized or Routes assets path not configured')
+    return
+  }
+
+  try {
+    console.log('Loading Routes from:', routesAssetsPath)
+    
+    // Fetch KML data
+    const response = await fetch(routesAssetsPath)
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    
+    const kmlText = await response.text()
+    const parser = new DOMParser()
+    const kmlDoc = parser.parseFromString(kmlText, 'text/xml')
+    
+    // Convert KML to GeoJSON
+    const geojson = kml(kmlDoc)
+    
+    console.log('Parsed Routes GeoJSON:', geojson)
+    
+    // Extract unique types from the routes data to create dynamic styling
+    const uniqueTypes = new Set()
+    if (geojson.features) {
+      geojson.features.forEach(feature => {
+        if (feature.properties && feature.properties.type) {
+          uniqueTypes.add(feature.properties.type)
+        }
+      })
+    }
+    
+    console.log('Unique Route types found:', Array.from(uniqueTypes))
+    
+    // Generate colors for each unique route type
+    const routeColors = [
+      '#e74c3c', '#3498db', '#f39c12', '#e67e22', '#9b59b6', 
+      '#27ae60', '#f1c40f', '#34495e', '#16a085', '#e91e63',
+      '#95a5a6', '#d35400', '#8e44ad', '#2c3e50', '#c0392b',
+      '#2980b9', '#ff6b35', '#d68910', '#7f8c8d', '#17a2b8'
+    ]
+    
+    // Create dynamic color mapping based on actual route types
+    const routeTypeColors = {}
+    Array.from(uniqueTypes).forEach((type, index) => {
+      routeTypeColors[type] = routeColors[index % routeColors.length]
+    })
+    
+    // Add default color for unknown types
+    routeTypeColors.default = '#3498db'
+    
+    console.log('Route type color mapping:', routeTypeColors)
+    
+    // Add source for Routes
+    map.value.addSource('routes', {
+      type: 'geojson',
+      data: geojson
+    })
+    
+    // Create expression for route width based on type or other properties
+    const widthExpression = [
+      'case',
+      ['!=', ['get', 'type'], null], 3,
+      2 // default width for routes without type
+    ]
+    
+    // Add line layer for Routes with solid red color
+    map.value.addLayer({
+      'id': 'routes-lines',
+      'type': 'line',
+      'source': 'routes',
+      'layout': {
+        'line-join': 'round',
+        'line-cap': 'round'
+      },
+      'paint': {
+        'line-color': '#e74c3c', // Solid red color
+        'line-width': widthExpression,
+        'line-opacity': 0.8
+      }
+    })
+    
+    // Add click event for Routes
+    map.value.on('click', 'routes-lines', (e) => {
+      const coordinates = e.lngLat
+      const properties = e.features[0].properties
+      
+      // Create popup content for routes
+      const popupContent = `
+        <div style="font-family: Arial, sans-serif;">
+          <h3 style="margin: 0 0 10px 0; color: #333;">${properties.name || 'Unnamed Route'}</h3>
+          <p style="margin: 5px 0;"><strong>Type:</strong> ${properties.type || 'Unknown'}</p>
+          ${properties.description ? `<p style="margin: 5px 0;"><strong>Description:</strong> ${properties.description}</p>` : ''}
+          ${properties.distance ? `<p style="margin: 5px 0;"><strong>Distance:</strong> ${properties.distance}</p>` : ''}
+        </div>
+      `
+      
+      new mapboxgl.Popup()
+        .setLngLat(coordinates)
+        .setHTML(popupContent)
+        .addTo(map.value)
+    })
+    
+    // Change the cursor to a pointer when hovering over Routes
+    map.value.on('mouseenter', 'routes-lines', () => {
+      map.value.getCanvas().style.cursor = 'pointer'
+    })
+    
+    map.value.on('mouseleave', 'routes-lines', () => {
+      map.value.getCanvas().style.cursor = ''
+    })
+    
+    console.log('Routes layer loaded successfully')
+    console.log('Total Routes loaded:', geojson.features ? geojson.features.length : 0)
+    console.log('Route Color legend:')
+    Object.entries(routeTypeColors).forEach(([type, color]) => {
+      if (type !== 'default') {
+        console.log(`  ${type}: ${color}`)
+      }
+    })
+    
+    // Fit map to routes bounding box
+    if (geojson.features && geojson.features.length > 0) {
+      // Calculate bounding box from all route features
+      let bounds = new mapboxgl.LngLatBounds()
+      
+      geojson.features.forEach(feature => {
+        if (feature.geometry.type === 'LineString') {
+          feature.geometry.coordinates.forEach(coord => {
+            bounds.extend(coord)
+          })
+        } else if (feature.geometry.type === 'MultiLineString') {
+          feature.geometry.coordinates.forEach(line => {
+            line.forEach(coord => {
+              bounds.extend(coord)
+            })
+          })
+        }
+      })
+      
+      // Fit the map to the bounds with some padding
+      map.value.fitBounds(bounds, {
+        padding: 50, // Add 50px padding around the bounds
+        duration: 1500 // Animation duration in milliseconds
+      })
+      
+      console.log('Map fitted to routes bounds:', bounds)
+    }
+    
+  } catch (error) {
+    console.error('Error loading Routes layer:', error)
   }
 }
 
