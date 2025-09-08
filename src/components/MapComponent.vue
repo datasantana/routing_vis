@@ -17,6 +17,10 @@ const routesAssetsPath = import.meta.env.VITE_ROUTES_ASSETS_PATH
 // Reactive references
 const map = ref(null)
 const mapContainer = ref(null)
+const animationControllers = ref(new Map()) // Store animation controllers for each route
+
+// Animation configuration
+const animationDuration = ref(2000) // 2 seconds per route animation (reasonable default)
 
 // Map initialization method
 const initializeMap = () => {
@@ -283,7 +287,7 @@ const loadRoutesLayer = async () => {
       2 // default width for routes without type
     ]
     
-    // Add line layer for Routes with solid red color
+    // Add line layer for Routes with subtle gray color (will be covered by animations)
     map.value.addLayer({
       'id': 'routes-lines',
       'type': 'line',
@@ -293,9 +297,9 @@ const loadRoutesLayer = async () => {
         'line-cap': 'round'
       },
       'paint': {
-        'line-color': '#e74c3c', // Solid red color
-        'line-width': widthExpression,
-        'line-opacity': 0.8
+        'line-color': '#cccccc', // Light gray color so animations are visible
+        'line-width': 2,
+        'line-opacity': 0.3 // Very subtle
       }
     })
     
@@ -338,6 +342,9 @@ const loadRoutesLayer = async () => {
       }
     })
     
+    // Start route animations after loading
+    startRouteAnimations(geojson)
+    
     // Fit map to routes bounding box
     if (geojson.features && geojson.features.length > 0) {
       // Calculate bounding box from all route features
@@ -371,8 +378,256 @@ const loadRoutesLayer = async () => {
   }
 }
 
+// Route animation functions
+const startRouteAnimations = (geojson) => {
+  if (!geojson || !geojson.features || !Array.isArray(geojson.features) || !map.value) {
+    console.error('Invalid GeoJSON data or map not initialized for animations')
+    return
+  }
+  
+  const totalRoutes = geojson.features.length
+  const totalAnimationTime = 1500000 // 25 minutes (1,500 seconds) total window
+  const routeDuration = 15000 // Each route takes 15 seconds to animate (very leisurely pace)
+  const staggerDelay = Math.max(200, (totalAnimationTime - routeDuration) / totalRoutes) // Stagger start times
+  
+  console.log(`Starting route animations for ${totalRoutes} routes...`)
+  console.log(`Animation window: ${totalAnimationTime / 1000} seconds (${totalAnimationTime / 60000} minutes)`)
+  console.log(`Duration per route: ${routeDuration / 1000} seconds`)
+  console.log(`Stagger delay: ${(staggerDelay / 1000).toFixed(1)}s between routes`)
+  
+  // Hide the base routes layer during animations to make animated routes visible
+  if (map.value.getLayer('routes-lines')) {
+    map.value.setLayoutProperty('routes-lines', 'visibility', 'none')
+  }
+  
+  // Add animated route sources and layers for each feature
+  geojson.features.forEach((feature, index) => {
+    // Validate that this feature has the expected geometry
+    if (!feature.geometry || 
+        !feature.geometry.coordinates || 
+        !Array.isArray(feature.geometry.coordinates) ||
+        feature.geometry.coordinates.length === 0) {
+      console.warn(`Skipping invalid route feature at index ${index}:`, feature)
+      return
+    }
+    
+    // Check if it's a LineString or MultiLineString
+    const isValidGeometry = feature.geometry.type === 'LineString' || 
+                           feature.geometry.type === 'MultiLineString'
+    
+    if (!isValidGeometry) {
+      console.warn(`Skipping route feature with unsupported geometry type at index ${index}:`, feature.geometry.type)
+      return
+    }
+    
+    const routeId = `route-${index}`
+    const animatedRouteId = `animated-${routeId}`
+    const vehicleId = `vehicle-${routeId}`
+    
+    try {
+      // Create empty animated route initially
+      map.value.addSource(animatedRouteId, {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: []
+            },
+            properties: feature.properties || {}
+          }]
+        }
+      })
+      
+      // Add animated route layer (this will be revealed progressively)
+      map.value.addLayer({
+        id: `${animatedRouteId}-line`,
+        type: 'line',
+        source: animatedRouteId,
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#e74c3c', // Solid red for animated routes
+          'line-width': 6, // Thicker than base layer
+          'line-opacity': 0.9
+        }
+      })
+      
+      // Start animation for this route with stagger delay
+      setTimeout(() => {
+        animateRoute(feature, routeId, animatedRouteId, vehicleId, index, routeDuration)
+      }, index * staggerDelay)
+      
+    } catch (error) {
+      console.error(`Error setting up animation for route ${index}:`, error)
+    }
+  })
+}
+
+const animateRoute = (feature, routeId, animatedRouteId, vehicleId, routeIndex, routeDuration) => {
+  // Handle both LineString and MultiLineString geometries
+  let coordinates = []
+  
+  if (feature.geometry.type === 'LineString') {
+    coordinates = feature.geometry.coordinates
+  } else if (feature.geometry.type === 'MultiLineString') {
+    // For MultiLineString, flatten all coordinates from all line segments to create one continuous path
+    coordinates = feature.geometry.coordinates.reduce((acc, lineString) => {
+      return acc.concat(lineString)
+    }, [])
+  } else {
+    console.error(`Unsupported geometry type for animation: ${feature.geometry.type}`)
+    return
+  }
+  
+  if (!coordinates || coordinates.length === 0) {
+    console.error(`No valid coordinates found for route ${routeIndex}`)
+    return
+  }
+  
+  console.log(`Route ${routeIndex}: ${coordinates.length} coordinates, duration: ${routeDuration}ms`)
+  
+  const totalSteps = coordinates.length
+  let currentStep = 0
+  let animatedCoordinates = []
+  let isAnimationActive = true
+  let startTime = null
+  
+  const animate = (timestamp) => {
+    // Check if map still exists and animation is active
+    if (!map.value || !isAnimationActive) {
+      return
+    }
+    
+    if (!startTime) startTime = timestamp
+    const elapsed = timestamp - startTime
+    
+    // Calculate progress as percentage of total duration
+    const progress = Math.min(elapsed / routeDuration, 1)
+    currentStep = Math.floor(progress * totalSteps)
+    
+    if (progress >= 1 || currentStep >= totalSteps) {
+      // Animation completed - show full route
+      animatedCoordinates = [...coordinates]
+      
+      try {
+        const animatedSource = map.value.getSource(animatedRouteId)
+        if (animatedSource) {
+          animatedSource.setData({
+            type: 'FeatureCollection',
+            features: [{
+              type: 'Feature',
+              geometry: {
+                type: 'LineString',
+                coordinates: animatedCoordinates
+              },
+              properties: feature.properties
+            }]
+          })
+        }
+      } catch (error) {
+        console.warn(`Final animation update error for route ${routeId}:`, error)
+      }
+      
+      console.log(`Route ${routeIndex + 1} animation completed in ${elapsed.toFixed(0)}ms`)
+      animationControllers.value.delete(routeId)
+      return
+    }
+    
+    // Get coordinates up to current step
+    animatedCoordinates = coordinates.slice(0, Math.max(1, currentStep + 1))
+    
+    try {
+      // Check if sources still exist before updating
+      const animatedSource = map.value.getSource(animatedRouteId)
+      
+      if (animatedSource) {
+        // Update animated route
+        animatedSource.setData({
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [...animatedCoordinates]
+            },
+            properties: feature.properties
+          }]
+        })
+      }
+    } catch (error) {
+      console.warn(`Animation error for route ${routeId}:`, error)
+      isAnimationActive = false
+      return
+    }
+    
+    // Continue animation using requestAnimationFrame for smooth performance
+    if (isAnimationActive) {
+      requestAnimationFrame(animate)
+    }
+  }
+  
+  // Store animation control function
+  const stopAnimation = () => {
+    isAnimationActive = false
+  }
+  
+  // Store stop function for external control
+  animationControllers.value.set(`${routeId}-stop`, stopAnimation)
+  
+  // Start animation immediately using requestAnimationFrame
+  requestAnimationFrame(animate)
+}
+
+const stopAllAnimations = () => {
+  console.log('Stopping all animations...')
+  
+  // Show the base routes layer again
+  if (map.value && map.value.getLayer('routes-lines')) {
+    map.value.setLayoutProperty('routes-lines', 'visibility', 'visible')
+  }
+  
+  // Clear all timeouts
+  animationControllers.value.forEach((value, key) => {
+    if (key.endsWith('-stop')) {
+      // Call stop function
+      if (typeof value === 'function') {
+        value()
+      }
+    } else if (Array.isArray(value)) {
+      // Clear timeout IDs
+      value.forEach(timeoutId => clearTimeout(timeoutId))
+    }
+  })
+  animationControllers.value.clear()
+  
+  console.log('All route animations stopped')
+}
+
+// Function to change animation speed
+const setAnimationSpeed = (durationInSeconds) => {
+  const newDuration = durationInSeconds * 1000 // Convert to milliseconds
+  animationDuration.value = newDuration
+  console.log(`Animation speed changed to ${durationInSeconds} seconds per route`)
+  
+  // If animations are running, restart them with new speed
+  if (animationControllers.value.size > 0) {
+    console.log('Restarting animations with new speed...')
+    stopAllAnimations()
+    // Reload routes to restart animations
+    loadRoutesLayer()
+  }
+}
+
 // Cleanup method
 const cleanup = () => {
+  // Stop all animations first
+  stopAllAnimations()
+  
   if (map.value) {
     map.value.remove()
     map.value = null
@@ -382,6 +637,11 @@ const cleanup = () => {
 // Vue lifecycle hooks
 onMounted(() => {
   initializeMap()
+  
+  // Expose animation control functions for debugging
+  window.setAnimationSpeed = setAnimationSpeed
+  window.stopAllAnimations = stopAllAnimations
+  console.log('Animation controls available: setAnimationSpeed(seconds), stopAllAnimations()')
 })
 
 onUnmounted(() => {
