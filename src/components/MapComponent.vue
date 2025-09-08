@@ -1,5 +1,41 @@
 <template>
-  <div id="map" class="map-container"></div>
+  <div class="map-wrapper">
+    <div id="map" class="map-container"></div>
+    
+    <!-- Layers Control Panel -->
+    <div class="layers-panel" :class="{ collapsed: isPanelCollapsed }">
+      <div class="panel-header" @click="togglePanel">
+        <span class="panel-title">Layers</span>
+        <span class="collapse-icon" :class="{ rotated: isPanelCollapsed }">▼</span>
+      </div>
+      
+      <div class="panel-content" v-show="!isPanelCollapsed">
+        <div class="layer-control">
+          <label class="layer-checkbox">
+            <input 
+              type="checkbox" 
+              v-model="poisVisible" 
+              @change="togglePoisVisibility"
+            />
+            <span class="checkmark"></span>
+            <span class="layer-name">Points of Interest</span>
+          </label>
+        </div>
+        
+        <div class="layer-control">
+          <label class="layer-checkbox">
+            <input 
+              type="checkbox" 
+              v-model="routesVisible" 
+              @change="toggleRoutesVisibility"
+            />
+            <span class="checkmark"></span>
+            <span class="layer-name">Routes</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -18,6 +54,11 @@ const routesAssetsPath = import.meta.env.VITE_ROUTES_ASSETS_PATH
 const map = ref(null)
 const mapContainer = ref(null)
 const animationControllers = ref(new Map()) // Store animation controllers for each route
+
+// Layer visibility controls
+const isPanelCollapsed = ref(false)
+const poisVisible = ref(false) // POIs hidden by default
+const routesVisible = ref(true) // Routes visible by default
 
 // Animation configuration
 const animationDuration = ref(2000) // 2 seconds per route animation (reasonable default)
@@ -137,11 +178,14 @@ const loadPoisLayer = async () => {
       2 // default size for features without type
     ]
     
-    // Add circle layer for POIs
+    // Add circle layer for POIs (initially hidden)
     map.value.addLayer({
       'id': 'pois-circles',
       'type': 'circle',
       'source': 'pois',
+      'layout': {
+        'visibility': poisVisible.value ? 'visible' : 'none'
+      },
       'paint': {
         'circle-radius': sizeExpression,
         'circle-color': colorExpression,
@@ -152,7 +196,7 @@ const loadPoisLayer = async () => {
       }
     })
     
-    // Add symbol layer for POI labels (optional)
+    // Add symbol layer for POI labels (initially hidden)
     map.value.addLayer({
       'id': 'pois-labels',
       'type': 'symbol',
@@ -163,7 +207,8 @@ const loadPoisLayer = async () => {
         'text-size': 10,
         'text-offset': [0, 1.5],
         'text-anchor': 'top',
-        'text-optional': true
+        'text-optional': true,
+        'visibility': poisVisible.value ? 'visible' : 'none'
       },
       'paint': {
         'text-color': '#333333',
@@ -623,6 +668,51 @@ const setAnimationSpeed = (durationInSeconds) => {
   }
 }
 
+// Layer visibility control functions
+const togglePanel = () => {
+  isPanelCollapsed.value = !isPanelCollapsed.value
+}
+
+const togglePoisVisibility = () => {
+  if (!map.value) return
+  
+  const visibility = poisVisible.value ? 'visible' : 'none'
+  
+  // Toggle POI layers
+  if (map.value.getLayer('pois-circles')) {
+    map.value.setLayoutProperty('pois-circles', 'visibility', visibility)
+  }
+  if (map.value.getLayer('pois-labels')) {
+    map.value.setLayoutProperty('pois-labels', 'visibility', visibility)
+  }
+  
+  console.log(`POIs visibility: ${poisVisible.value ? 'visible' : 'hidden'}`)
+}
+
+const toggleRoutesVisibility = () => {
+  if (!map.value) return
+  
+  const visibility = routesVisible.value ? 'visible' : 'none'
+  
+  // Toggle base routes layer
+  if (map.value.getLayer('routes-lines')) {
+    map.value.setLayoutProperty('routes-lines', 'visibility', visibility)
+  }
+  
+  // Toggle animated route layers (if any exist)
+  const sources = map.value.getStyle().sources
+  Object.keys(sources).forEach(sourceId => {
+    if (sourceId.startsWith('animated-route-')) {
+      const layerId = `${sourceId}-line`
+      if (map.value.getLayer(layerId)) {
+        map.value.setLayoutProperty(layerId, 'visibility', visibility)
+      }
+    }
+  })
+  
+  console.log(`Routes visibility: ${routesVisible.value ? 'visible' : 'hidden'}`)
+}
+
 // Cleanup method
 const cleanup = () => {
   // Stop all animations first
@@ -650,6 +740,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.map-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
 .map-container {
   width: 100%;
   height: 100%;
@@ -660,5 +756,132 @@ onUnmounted(() => {
 #map {
   width: 100%;
   height: 100%;
+}
+
+/* Layers Panel Styles */
+.layers-panel {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 200px;
+  z-index: 1000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.layers-panel.collapsed {
+  min-width: auto;
+}
+
+.panel-header {
+  padding: 12px 16px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  user-select: none;
+}
+
+.panel-header:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.panel-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #333;
+}
+
+.collapse-icon {
+  font-size: 12px;
+  transition: transform 0.2s ease;
+  color: #666;
+}
+
+.collapse-icon.rotated {
+  transform: rotate(-90deg);
+}
+
+.panel-content {
+  padding: 8px 0;
+}
+
+.layer-control {
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+}
+
+.layer-control:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.layer-checkbox {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 13px;
+  color: #333;
+}
+
+.layer-checkbox input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.checkmark {
+  width: 16px;
+  height: 16px;
+  background-color: #fff;
+  border: 2px solid #ddd;
+  border-radius: 3px;
+  margin-right: 8px;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.layer-checkbox input[type="checkbox"]:checked + .checkmark {
+  background-color: #2196F3;
+  border-color: #2196F3;
+}
+
+.layer-checkbox input[type="checkbox"]:checked + .checkmark::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.layer-name {
+  font-weight: 500;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .layers-panel {
+    top: 5px;
+    left: 5px;
+    min-width: 180px;
+    font-size: 12px;
+  }
+  
+  .panel-title {
+    font-size: 13px;
+  }
+  
+  .layer-checkbox {
+    font-size: 12px;
+  }
 }
 </style>
