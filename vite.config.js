@@ -5,30 +5,32 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   
-  // Optimize for Mapbox GL JS performance
+  // Optimize dependencies for Mapbox GL JS
   optimizeDeps: {
     include: [
-      'mapbox-gl',
-      '@mapbox/togeojson'
-    ]
+      'mapbox-gl'
+    ],
+    exclude: []
   },
   
-  // Build optimizations
+  // Build configuration
   build: {
     rollupOptions: {
       output: {
+        // Separate Mapbox into its own chunk for better caching
         manualChunks: {
-          // Separate Mapbox into its own chunk for better caching
           mapbox: ['mapbox-gl'],
-          geojson: ['@mapbox/togeojson']
+          vendor: ['vue']
         }
       }
     },
-    // Increase chunk size warning limit for Mapbox
-    chunkSizeWarningLimit: 1000
+    // Increase chunk size warning limit for Mapbox (it's a large library)
+    chunkSizeWarningLimit: 1000,
+    // Enable source maps for better debugging
+    sourcemap: false
   },
   
-  // CSS handling to prevent conflicts with Mapbox styles
+  // CSS configuration to handle Mapbox styles properly
   css: {
     preprocessorOptions: {
       css: {
@@ -37,16 +39,31 @@ export default defineConfig({
     }
   },
   
-  // Define global constants for better tree-shaking
+  // Define global constants
   define: {
-    // Disable Mapbox GL JS telemetry for better performance
-    'process.env.MapboxAccessToken': JSON.stringify(process.env.VITE_MAPBOX_ACCESS_TOKEN || ''),
+    // Ensure proper environment variable handling
+    __VUE_OPTIONS_API__: true,
+    __VUE_PROD_DEVTOOLS__: false
   },
   
-  // Server configuration for better development experience
+  // Server configuration for development
   server: {
     fs: {
       strict: false
+    },
+    cors: true,
+    // Headers for external resource loading
+    headers: {
+      'Cross-Origin-Embedder-Policy': 'credentialless',
+      'Cross-Origin-Opener-Policy': 'same-origin'
     }
-  }
+  },
+  
+  // Worker configuration for Mapbox GL JS
+  worker: {
+    format: 'es'
+  },
+  
+  // Asset handling
+  assetsInclude: ['**/*.geojson', '**/*.kml']
 })

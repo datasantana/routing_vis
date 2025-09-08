@@ -5,13 +5,12 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import mapboxgl from 'mapbox-gl'
-// Import Mapbox CSS with higher specificity to avoid conflicts
 import 'mapbox-gl/dist/mapbox-gl.css'
-import { kml } from '@mapbox/togeojson'
 
 // Environment variables
 const mapboxAccessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
 const mapboxBasemap = import.meta.env.VITE_MAPBOX_STANDARD_BASEMAP || 'mapbox://styles/mapbox/streets-v12'
+// Use environment variables for GeoJSON URLs
 const poisAssetsPath = import.meta.env.VITE_POIS_ASSETS_PATH
 const routesAssetsPath = import.meta.env.VITE_ROUTES_ASSETS_PATH
 
@@ -35,13 +34,7 @@ const initializeMap = () => {
     style: mapboxBasemap, // style URL
     center: [-101.5731833069, 26.5346045702], // starting position [lng, lat]
     zoom: 7.5, // starting zoom
-    projection: 'mercator', // map projection
-    // Performance optimizations
-    antialias: true, // Enable antialiasing for smoother rendering
-    optimizeForTerrain: false, // Disable terrain optimization if not needed
-    renderWorldCopies: false, // Disable rendering multiple world copies for better performance
-    maxZoom: 18, // Set reasonable max zoom to prevent over-detailed rendering
-    minZoom: 2 // Set minimum zoom
+    projection: 'mercator' // map projection
   })
 
   // Add navigation controls
@@ -65,7 +58,7 @@ const initializeMap = () => {
   })
 }
 
-// Load POIs layer from KML
+// Load POIs layer from GeoJSON
 const loadPoisLayer = async () => {
   if (!map.value || !poisAssetsPath) {
     console.error('Map not initialized or POIS assets path not configured')
@@ -75,18 +68,13 @@ const loadPoisLayer = async () => {
   try {
     console.log('Loading POIs from:', poisAssetsPath)
     
-    // Fetch KML data
+    // Fetch GeoJSON data directly
     const response = await fetch(poisAssetsPath)
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
     
-    const kmlText = await response.text()
-    const parser = new DOMParser()
-    const kmlDoc = parser.parseFromString(kmlText, 'text/xml')
-    
-    // Convert KML to GeoJSON
-    const geojson = kml(kmlDoc)
+    const geojson = await response.json()
     
     console.log('Parsed GeoJSON:', geojson)
     
@@ -231,7 +219,7 @@ const loadPoisLayer = async () => {
   }
 }
 
-// Load Routes layer from KML
+// Load Routes layer from GeoJSON
 const loadRoutesLayer = async () => {
   if (!map.value || !routesAssetsPath) {
     console.error('Map not initialized or Routes assets path not configured')
@@ -241,18 +229,13 @@ const loadRoutesLayer = async () => {
   try {
     console.log('Loading Routes from:', routesAssetsPath)
     
-    // Fetch KML data
+    // Fetch GeoJSON data directly
     const response = await fetch(routesAssetsPath)
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
     
-    const kmlText = await response.text()
-    const parser = new DOMParser()
-    const kmlDoc = parser.parseFromString(kmlText, 'text/xml')
-    
-    // Convert KML to GeoJSON
-    const geojson = kml(kmlDoc)
+    const geojson = await response.json()
     
     console.log('Parsed Routes GeoJSON:', geojson)
     
